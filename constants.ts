@@ -93,7 +93,7 @@ export const VOICE_MODEL_NAME = 'gemini-2.5-flash-native-audio-preview-09-2025';
 
 // Helper to get API Client
 export const getNeuralUplink = () => {
-  const apiKey = import.meta.env.VITE_API_KEY || process.env.API_KEY;
+  const apiKey = import.meta.env.VITE_GROK_API_KEY || process.env.API_KEY;
   if (!apiKey) {
     console.error("API_KEY is missing...");
     throw new Error("API Key missing");

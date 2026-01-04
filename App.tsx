@@ -79,7 +79,7 @@ const App: React.FC = () => {
           setApiKeyReady(hasKey);
         } else {
           // Fallback for non-aistudio environments (dev)
-          setApiKeyReady(!!import.meta.env.VITE_API_KEY || !!process.env.API_KEY);
+          setApiKeyReady(!!import.meta.env.VITE_GROK_API_KEY);
         }
       } catch (e) {
         console.error("Key check failed", e);

@@ -223,7 +223,7 @@ export const AI_MODELS: AIModel[] = [
     provider: "OpenAI",
     icon: "fa-bolt",
     description: "OpenAI-compatible chat",
-    internalModelId: "gpt-5-2",
+    internalModelId: "gpt-5.2",
   },
 
   // Anthropic example (replace internalModelId with what your account has access to)

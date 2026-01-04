@@ -53,7 +53,7 @@ export enum AppState {
 export interface AIModel {
   id: string;
   name: string;
-  provider: string;
+  provider: string; // 'Google' | 'OpenAI' | 'Anthropic' | 'xAI' | 'Moonshot'
   icon: string; 
   description: string;
   internalModelId: string; 
@@ -92,4 +92,5 @@ export interface UserProfile {
   textSize: number; // Percentage (e.g. 100 = 100%)
   allowDataTraining: boolean; // Mock privacy setting
   connectedApps: Record<string, ConnectedApp>;
+  apiKeys: Record<string, string>; // Provider -> Key map (e.g. { 'openai': 'sk-...', 'google': 'AIza...' })
 }

@@ -1,4 +1,5 @@
 
+
 import { ChatSession, UserProfile, ConnectedApp } from '../types';
 
 const STORAGE_KEY = 'aether_sessions_v1';
@@ -101,7 +102,14 @@ const DEFAULT_PROFILE: UserProfile = {
   themePreference: 'cyber',
   textSize: 100,
   allowDataTraining: false,
-  connectedApps: DEFAULT_APPS
+  connectedApps: DEFAULT_APPS,
+  apiKeys: {
+    'google': '',
+    'openai': '',
+    'anthropic': '',
+    'xai': '',
+    'moonshot': ''
+  }
 };
 
 export const getUserProfile = (): UserProfile => {
@@ -114,7 +122,8 @@ export const getUserProfile = (): UserProfile => {
     return { 
         ...DEFAULT_PROFILE, 
         ...parsed,
-        connectedApps: { ...DEFAULT_PROFILE.connectedApps, ...(parsed.connectedApps || {}) }
+        connectedApps: { ...DEFAULT_PROFILE.connectedApps, ...(parsed.connectedApps || {}) },
+        apiKeys: { ...DEFAULT_PROFILE.apiKeys, ...(parsed.apiKeys || {}) }
     };
   } catch (e) {
     return DEFAULT_PROFILE;

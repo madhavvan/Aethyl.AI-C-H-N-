@@ -1,19 +1,6 @@
-// services/aiService.ts
-// GROK (xAI) UPDATED VERSION — preserves the same public API + structure,
-// keeps your system-instruction + profile injection logic, keeps streaming + onChunk,
-// keeps attachments handling blocks (but adapts them for Grok).
-// UPDATED MODEL: grok-4-1-fast-reasoning
-
+import { GoogleGenAI } from "@google/genai";
 import { SYSTEM_INSTRUCTION, getNeuralUplink, getSystemInstructionForFocus } from "../constants";
-import { Source, GroundingChunk, AIModel, FocusMode, Attachment, UserProfile } from "../types";
-
-/**
- * NOTE:
- * - This file no longer uses @google/genai. Grok is called via HTTPS to xAI API.
- * - Some Gemini-specific features (googleSearch grounding metadata, image generation inlineData)
- *   are not available in the same way via xAI chat completions, so sources/images remain supported
- *   in the return shape but may stay empty unless you implement your own retrieval/image pipeline.
- */
+import { Source, AIModel, FocusMode, Attachment, UserProfile } from "../types";
 
 export interface SearchResponse {
   text: string;
@@ -21,39 +8,22 @@ export interface SearchResponse {
   images?: string[];
 }
 
-type XaiChatCompletionChunk = {
+// --- OPENAI COMPATIBLE TYPES (xAI, Moonshot, OpenAI) ---
+type ChatCompletionChunk = {
   id?: string;
-  object?: string;
-  created?: number;
-  model?: string;
   choices?: Array<{
-    index: number;
-    delta?: { role?: string; content?: string };
-    message?: { role: string; content: string };
-    finish_reason?: string | null;
+    delta?: { content?: string };
   }>;
 };
 
-type XaiChatCompletionResponse = {
-  id: string;
-  object: string;
-  created: number;
-  model: string;
-  choices: Array<{
-    index: number;
-    message: { role: string; content: string };
-    finish_reason: string | null;
-  }>;
-  usage?: {
-    prompt_tokens: number;
-    completion_tokens: number;
-    total_tokens: number;
-  };
+const PROVIDER_URLS: Record<string, string> = {
+    'xAI': "https://api.x.ai/v1/chat/completions",
+    'OpenAI': "https://api.openai.com/v1/chat/completions",
+    'Moonshot': "https://api.moonshot.cn/v1/chat/completions",
+    'Anthropic': "https://api.anthropic.com/v1/messages"
 };
 
-const XAI_CHAT_COMPLETIONS_URL = "https://api.x.ai/v1/chat/completions";
-
-// Small helper: safe access to env in Vite
+// Helper: safe access to env in Vite
 const getEnvKey = (name: string): string | undefined => {
   try {
     // @ts-ignore
@@ -63,7 +33,24 @@ const getEnvKey = (name: string): string | undefined => {
   }
 };
 
-// SSE parsing helper for xAI streaming
+// --- KEY RETRIEVAL HELPER ---
+const getApiKeyForProvider = (provider: string, userProfile: UserProfile): string | undefined => {
+    // 1. Check User Profile first (Bring Your Own Key)
+    const profileKey = userProfile.apiKeys?.[provider.toLowerCase()];
+    if (profileKey) return profileKey;
+
+    // 2. Check Environment Variables (Deployment Config)
+    switch(provider) {
+        case 'Google': return getEnvKey('VITE_GOOGLE_API_KEY') || getEnvKey('API_KEY');
+        case 'xAI': return getEnvKey('VITE_GROK_API_KEY');
+        case 'OpenAI': return getEnvKey('VITE_OPENAI_API_KEY');
+        case 'Anthropic': return getEnvKey('VITE_ANTHROPIC_API_KEY');
+        case 'Moonshot': return getEnvKey('VITE_MOONSHOT_API_KEY');
+        default: return undefined;
+    }
+};
+
+// --- SSE HELPER ---
 async function* sseLines(stream: ReadableStream<Uint8Array>) {
   const reader = stream.getReader();
   const decoder = new TextDecoder("utf-8");
@@ -72,11 +59,7 @@ async function* sseLines(stream: ReadableStream<Uint8Array>) {
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
-
     buffer += decoder.decode(value, { stream: true });
-
-    // SSE events are separated by \n\n; but lines can arrive partial.
-    // We'll process line-by-line, because OpenAI-style streaming uses "data: {...}\n\n".
     let newlineIndex: number;
     while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
       const line = buffer.slice(0, newlineIndex);
@@ -84,90 +67,27 @@ async function* sseLines(stream: ReadableStream<Uint8Array>) {
       yield line.trimEnd();
     }
   }
-
-  if (buffer.length > 0) {
-    yield buffer.trimEnd();
-  }
+  if (buffer.length > 0) yield buffer.trimEnd();
 }
 
+// --- FORMATTING HELPERS ---
 function mapHistoryToOpenAIStyle(history: { role: string; parts: { text: string }[] }[]) {
-  // Your app uses Gemini-ish history shape:
-  // role: "user" | "model"
-  // Grok expects "user" | "assistant" | "system"
   return history
-    .map((h) => {
-      const role =
-        h.role === "model" ? "assistant" :
-        h.role === "user" ? "user" :
-        // In case anything else appears, treat as user
-        "user";
-
-      const content = (h.parts || [])
-        .map((p) => p?.text ?? "")
-        .join("");
-
-      return { role, content };
-    })
-    .filter((m) => m.content?.trim?.().length > 0);
+    .map((h) => ({
+      role: h.role === "model" ? "assistant" : "user",
+      content: h.parts.map(p => p.text || "").join("")
+    }))
+    .filter(m => m.content.trim().length > 0);
 }
 
-export const generateChatTitle = async (
-  query: string,
-  responseContext: string
-): Promise<string> => {
-  try {
-    // Keep this call site the same; your constants can return whatever you want.
-    // We’ll treat getNeuralUplink() as a "key provider" for Grok.
-    // Recommended: have getNeuralUplink() return the final key string, or an object with apiKey.
-    const uplink: any = getNeuralUplink();
-
-    // Resolve key from uplink OR env fallback (Vite)
-    const apiKey =
-      uplink?.apiKey ||
-      uplink?.key ||
-      getEnvKey("VITE_GROK_API_KEY") ||
-      // keep your old fallback for dev compatibility if you polyfill process.env
-      // @ts-ignore
-      (typeof process !== "undefined" ? process.env?.API_KEY : undefined);
-
-    if (!apiKey) throw new Error("Grok API key missing");
-
-    const prompt = `Based on the following interaction, generate a short, concise, and cool 3-5 word title for this chat session. No quotes, no "Title:", just the raw string.
-    
-    User: ${query.substring(0, 300)}
-    AI: ${responseContext.substring(0, 300)}...`;
-
-    const body = {
-      // Choose a cheap/fast model for titles (adjust if you prefer)
-      model: "grok-4-1-fast-reasoning",
-      messages: [
-        { role: "system", content: "You generate concise chat titles." },
-        { role: "user", content: prompt },
-      ],
-      max_tokens: 20000,
-      temperature: 0.7,
-      stream: false,
-    };
-
-    const res = await fetch(XAI_CHAT_COMPLETIONS_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-    });
-
-    if (!res.ok) throw new Error(`xAI error ${res.status}`);
-
-    const data = (await res.json()) as XaiChatCompletionResponse;
-    const title = data.choices?.[0]?.message?.content?.trim();
-    return title || query.substring(0, 30);
-  } catch (e) {
-    return query.substring(0, 30);
-  }
+// --- TITLE GENERATION ---
+export const generateChatTitle = async (query: string, responseContext: string): Promise<string> => {
+    // Simple logic: return truncated query to save tokens/calls on title gen for now
+    // or implement a lightweight call if desired.
+    return query.length > 40 ? query.substring(0, 40) + "..." : query;
 };
 
+// --- MAIN SEARCH FUNCTION ---
 export const performDeepSearch = async (
   query: string,
   history: { role: string; parts: { text: string }[] }[],
@@ -177,217 +97,183 @@ export const performDeepSearch = async (
   focusMode: FocusMode = "all",
   onChunk?: (text: string) => void
 ): Promise<SearchResponse> => {
-  try {
-    const uplink: any = getNeuralUplink();
+  
+  const provider = selectedModel.provider;
+  const apiKey = getApiKeyForProvider(provider, userProfile);
 
-    // Resolve key from uplink OR env fallback (Vite)
-    const apiKey =
-      uplink?.apiKey ||
-      uplink?.key ||
-      getEnvKey("VITE_GROK_API_KEY") ||
-      // keep your old fallback for dev compatibility if you polyfill process.env
-      // @ts-ignore
-      (typeof process !== "undefined" ? process.env?.API_KEY : undefined);
-
-    if (!apiKey) {
-      throw new Error("Grok API key missing");
-    }
-
-    // 1. Prepare Content
-    // Preserve your original flow: build "contents" from history + currentParts from attachments + query.
-    // For Grok, we transform into OpenAI-style messages:
-    const baseMessages = mapHistoryToOpenAIStyle(history);
-
-    // Keep your "currentParts" concept so you don't lose anything.
-    const currentParts: any[] = [];
-
-    // Add Attachments with Safety Check (preserved)
-    for (const att of attachments) {
-      if (att.isText) {
-        currentParts.push({
-          text: `\n\n--- FILE ATTACHMENT: ${att.name} ---\n${att.data}\n--- END ATTACHMENT ---\n\n`
-        });
-      } else {
-        // Ensure strictly supported types for inlineData to prevent 400 errors (preserved)
-        const supportedTypes = [
-            "application/pdf",
-            "image/png", "image/jpeg", "image/webp", "image/heic", "image/heif",
-            "audio/wav", "audio/mp3", "audio/aiff", "audio/aac", "audio/ogg", "audio/flac",
-            "video/mp4", "video/mpeg", "video/mov", "video/avi", "video/x-flv", "video/mpg", "video/webm", "video/wmv", "video/3gpp"
-        ];
-        
-        // Grok chat completions (OpenAI-style) do NOT accept Gemini inlineData the same way.
-        // We preserve this block and adapt by including a textual placeholder describing the attachment.
-        if (supportedTypes.includes(att.type)) {
-            currentParts.push({
-              text: `\n\n--- BINARY ATTACHMENT (not inline-supported in this Grok adapter): ${att.name} (${att.type}) ---\n` +
-                    `The file was provided as base64 (${(att.data?.length ?? 0)} chars). ` +
-                    `If you need the model to use this file, route via a server or a multimodal endpoint you control.\n` +
-                    `--- END ATTACHMENT ---\n\n`
-            });
-        } else {
-            console.warn(`Skipping attachment ${att.name}: Unsupported MIME type for inlineData: ${att.type}`);
-            currentParts.push({
-              text: `\n\n--- ATTACHMENT SKIPPED: ${att.name} (${att.type}) unsupported ---\n\n`
-            });
-        }
-      }
-    }
-
-    if (query.trim()) {
-      currentParts.push({ text: query });
-    }
-
-    // Convert currentParts into a single user content string
-    const currentUserContent = currentParts
-      .map((p) => (typeof p?.text === "string" ? p.text : ""))
-      .join("");
-
-    // 2. Prepare System Instruction (preserved + same injection)
-    const focusInstruction = getSystemInstructionForFocus(focusMode);
-    
-    let combinedSystemInstruction = SYSTEM_INSTRUCTION;
-    if (selectedModel.systemInstructionPrefix) {
-      combinedSystemInstruction = `${selectedModel.systemInstructionPrefix}\n\n${SYSTEM_INSTRUCTION}`;
-    }
-    
-    // INJECT USER PROFILE CONTEXT
-    if (userProfile.aboutMe.trim()) {
-      combinedSystemInstruction += `\n\nUSER CONTEXT (Who you are talking to):\n${userProfile.aboutMe}`;
-    }
-    
-    if (userProfile.customInstructions.trim()) {
-      combinedSystemInstruction += `\n\nUSER PREFERENCES (How to respond):\n${userProfile.customInstructions}`;
-    }
-
-    if (focusInstruction) {
-      combinedSystemInstruction += `\n\nCURRENT FOCUS MODE: ${focusMode.toUpperCase()}. ${focusInstruction}`;
-    }
-
-    // INJECT CONNECTED APPS (preserved)
-    const connectedAppNames = userProfile.connectedApps 
-      ? Object.values(userProfile.connectedApps)
-          .filter(app => app.isConnected)
-          .map(app => app.name)
-      : [];
-        
-    if (connectedAppNames.length > 0) {
-        combinedSystemInstruction += `\n\nACTIVE DATA INTEGRATIONS: ${connectedAppNames.join(', ')}. 
-        You have authorization to access data from these sources if relevant to the query. 
-        Since this is a simulated environment, if the user asks about their personal data from these sources, clearly label any fabricated examples as [MOCK DATA] and do not present them as real.`;
-    }
-
-    // 3. Configure Capability Adapters (preserved shape)
-    // Gemini had tools: [{ googleSearch: {} }] and thinkingConfig/imageConfig.
-    // Grok chat completions do not accept these fields directly. We keep "config" but adapt later.
-    const config: any = {
-      systemInstruction: combinedSystemInstruction,
-      tools: [{ googleSearch: {} }], 
-    };
-
-    if (selectedModel.useThinking) {
-      // Keep the flag. xAI supports reasoning in some models/configs, but not via this exact param.
-      config.thinkingConfig = { thinkingBudget: 2048 }; 
-    }
-    
-    if (selectedModel.supportsImageGeneration) {
-       config.imageConfig = {
-          aspectRatio: "1:1",
-          imageSize: "1K"
-       };
-    }
-
-    let internalModel = selectedModel.internalModelId;
-
-    // --- GROK EXECUTE - STREAMING MODE ---
-    // We preserve your streaming behavior:
-    // - accumulate fullText
-    // - call onChunk(fullText) repeatedly
-    // - return { text, sources, images }
-    //
-    // With Grok streaming (OpenAI-style), we parse SSE "data:" lines.
-    const messages = [
-      { role: "system", content: combinedSystemInstruction },
-      ...baseMessages,
-      { role: "user", content: currentUserContent },
-    ];
-
-    const requestBody = {
-      model: internalModel || "grok-4-1-fast-reasoning",
-      messages,
-      temperature: 0.7,
-      stream: true,
-      // You can set max_tokens if you want:
-      // max_tokens: 2048,
-    };
-
-    const res = await fetch(XAI_CHAT_COMPLETIONS_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(requestBody),
-    });
-
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      throw new Error(`xAI error ${res.status}: ${errText}`);
-    }
-
-    if (!res.body) {
-      throw new Error("xAI response has no body (streaming not supported in this environment).");
-    }
-    
-    let fullText = "";
-    const images: string[] = [];
-    const sources: Source[] = [];
-    const sourceMap = new Set<string>();
-
-    // We keep your GroundingChunk logic placeholders,
-    // but xAI does not provide Gemini groundingMetadata, so this stays empty by default.
-    const consumeChunk = (c: XaiChatCompletionChunk) => {
-      const delta = c.choices?.[0]?.delta?.content ?? "";
-      
-      // Accumulate Text
-      if (delta) {
-        fullText += delta;
-        if (onChunk) {
-          onChunk(fullText);
-        }
-      }
-
-      // Collect Images — not available in this adapter (preserved path)
-      // Collect Sources — not available in this adapter (preserved path)
-      // If you later add retrieval/tooling, you can populate sources here.
-    };
-
-    for await (const line of sseLines(res.body)) {
-      // OpenAI-style streams send:
-      // data: {...}
-      // data: [DONE]
-      if (!line) continue;
-      if (!line.startsWith("data:")) continue;
-
-      const dataStr = line.slice("data:".length).trim();
-      if (dataStr === "[DONE]") break;
-
-      try {
-        const parsed = JSON.parse(dataStr) as XaiChatCompletionChunk;
-        consumeChunk(parsed);
-      } catch {
-        // ignore parse errors on keepalive lines
-      }
-    }
-    
-    if (!fullText && images.length === 0) {
-       fullText = "Data retrieval failed. The void returned nothing.";
-    }
-
-    return { text: fullText, sources, images };
-
-  } catch (error) {
-    console.error("Model Adapter Error:", error);
-    throw error;
+  if (!apiKey) {
+      throw new Error(`Missing API Key for ${provider}. Please add it in Settings > API Keys.`);
   }
+
+  // 1. Prepare System Instruction
+  let systemInstruction = SYSTEM_INSTRUCTION;
+  if (selectedModel.systemInstructionPrefix) {
+      systemInstruction = `${selectedModel.systemInstructionPrefix}\n\n${systemInstruction}`;
+  }
+  
+  if (userProfile.aboutMe) systemInstruction += `\n\nUSER CONTEXT:\n${userProfile.aboutMe}`;
+  if (userProfile.customInstructions) systemInstruction += `\n\nUSER PREFERENCES:\n${userProfile.customInstructions}`;
+  
+  const focusInst = getSystemInstructionForFocus(focusMode);
+  if (focusInst) systemInstruction += `\n\nFOCUS MODE (${focusMode.toUpperCase()}): ${focusInst}`;
+
+  // 2. Prepare Context/Attachments
+  const contextParts: string[] = [];
+  attachments.forEach(att => {
+      if (att.isText) {
+          contextParts.push(`\n[FILE: ${att.name}]\n${att.data}\n[END FILE]\n`);
+      } else {
+          contextParts.push(`\n[BINARY FILE: ${att.name} (${att.type}) - Content Omitted in Text Stream]\n`);
+      }
+  });
+  
+  const finalQuery = `${contextParts.join('\n')}\n\n${query}`;
+
+  // --- ROUTING ---
+  
+  // A. GOOGLE GEMINI
+  if (provider === 'Google') {
+      const ai = new GoogleGenAI({ apiKey });
+      const modelId = selectedModel.internalModelId;
+      
+      // Map history to Gemini Format
+      // Note: We use the existing structure passed in 'history' which is already partially Gemini-shaped
+      // but strictly it should be Content objects.
+      
+      // Construct Request
+      const contents = history.map(h => ({
+          role: h.role,
+          parts: h.parts
+      }));
+      // Add current message
+      contents.push({ role: 'user', parts: [{ text: finalQuery }] });
+
+      const config: any = {
+          systemInstruction,
+          tools: [{ googleSearch: {} }] // Only for Gemini
+      };
+      
+      if (selectedModel.useThinking) config.thinkingConfig = { thinkingBudget: 2048 };
+      
+      const responseStream = await ai.models.generateContentStream({
+          model: modelId,
+          contents,
+          config
+      });
+
+      let fullText = "";
+      const sources: Source[] = [];
+      
+      for await (const chunk of responseStream) {
+          const text = chunk.text;
+          if (text) {
+              fullText += text;
+              onChunk?.(fullText);
+          }
+          
+          // Collect Grounding
+          if (chunk.candidates?.[0]?.groundingMetadata?.groundingChunks) {
+             chunk.candidates[0].groundingMetadata.groundingChunks.forEach((c: any) => {
+                 if (c.web?.uri && c.web?.title) {
+                     sources.push({ title: c.web.title, url: c.web.uri });
+                 }
+             });
+          }
+      }
+      return { text: fullText, sources, images: [] };
+  }
+
+  // B. ANTHROPIC (CLAUDE)
+  if (provider === 'Anthropic') {
+      // NOTE: Direct browser calls to Anthropic usually fail CORS unless proxied.
+      // We implement standard fetch here.
+      
+      const messages = mapHistoryToOpenAIStyle(history);
+      messages.push({ role: 'user', content: finalQuery });
+
+      const res = await fetch(PROVIDER_URLS.Anthropic, {
+          method: 'POST',
+          headers: {
+              'x-api-key': apiKey,
+              'anthropic-version': '2023-06-01',
+              'content-type': 'application/json',
+              'dangerously-allow-browser': 'true' // Client-side specific header for Anthropic
+          },
+          body: JSON.stringify({
+              model: selectedModel.internalModelId,
+              max_tokens: 4096,
+              messages: messages,
+              system: systemInstruction,
+              stream: true
+          })
+      });
+
+      if (!res.ok) throw new Error(`Anthropic API Error: ${res.status}`);
+      if (!res.body) throw new Error("No response body");
+
+      let fullText = "";
+      for await (const line of sseLines(res.body)) {
+          if (!line.startsWith("data:")) continue;
+          const dataStr = line.slice(5).trim();
+          if (!dataStr || dataStr === '[DONE]') continue;
+          
+          try {
+              const event = JSON.parse(dataStr);
+              if (event.type === 'content_block_delta' && event.delta?.text) {
+                  fullText += event.delta.text;
+                  onChunk?.(fullText);
+              }
+          } catch(e) {}
+      }
+      return { text: fullText, sources: [] };
+  }
+
+  // C. OPENAI / xAI / MOONSHOT (COMPATIBLE)
+  if (['OpenAI', 'xAI', 'Moonshot'].includes(provider)) {
+      const url = PROVIDER_URLS[provider];
+      const messages = [
+          { role: 'system', content: systemInstruction },
+          ...mapHistoryToOpenAIStyle(history),
+          { role: 'user', content: finalQuery }
+      ];
+
+      const res = await fetch(url, {
+          method: 'POST',
+          headers: {
+              'Authorization': `Bearer ${apiKey}`,
+              'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+              model: selectedModel.internalModelId,
+              messages,
+              stream: true,
+              temperature: 0.7
+          })
+      });
+
+      if (!res.ok) {
+          const err = await res.text();
+          throw new Error(`${provider} API Error: ${res.status} - ${err}`);
+      }
+      if (!res.body) throw new Error("No response body");
+
+      let fullText = "";
+      for await (const line of sseLines(res.body)) {
+          if (!line.startsWith("data:")) continue;
+          const dataStr = line.slice(5).trim();
+          if (dataStr === '[DONE]') break;
+          
+          try {
+              const parsed = JSON.parse(dataStr) as ChatCompletionChunk;
+              const content = parsed.choices?.[0]?.delta?.content;
+              if (content) {
+                  fullText += content;
+                  onChunk?.(fullText);
+              }
+          } catch (e) {}
+      }
+      return { text: fullText, sources: [] };
+  }
+
+  throw new Error(`Provider ${provider} not implemented.`);
 };

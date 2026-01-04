@@ -1,3 +1,5 @@
+
+
 import React, { useState, useEffect, useRef } from 'react';
 import { UserProfile, ConnectedApp } from '../types';
 
@@ -9,7 +11,7 @@ interface UserProfileModalProps {
   onClearData: () => void;
 }
 
-type SettingsTab = 'account' | 'appearance' | 'behavior' | 'data' | 'connected';
+type SettingsTab = 'account' | 'api_keys' | 'appearance' | 'behavior' | 'data' | 'connected';
 
 const UserProfileModal: React.FC<UserProfileModalProps> = ({ 
   isOpen, 
@@ -193,6 +195,16 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
     }
   };
 
+  const handleKeyChange = (provider: string, value: string) => {
+      setFormData(prev => ({
+          ...prev,
+          apiKeys: {
+              ...prev.apiKeys,
+              [provider]: value.trim()
+          }
+      }));
+  };
+
   // Helper for Sidebar Items
   const SidebarItem = ({ id, label, icon }: { id: SettingsTab; label: string; icon: string }) => (
     <button
@@ -200,7 +212,7 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
       className={`w-full text-left px-4 py-3 rounded-lg flex items-center gap-3 transition-all duration-200 mb-1
         ${activeTab === id 
           ? 'bg-slate-800 text-white font-medium' 
-          : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+          : 'text-slate-400 hover:text-slate-200 hover:text-white hover:bg-slate-800/50'
         }`}
     >
       <i className={`fa-solid ${icon} w-5 text-center text-sm ${activeTab === id ? 'text-aether-accent' : ''}`}></i>
@@ -249,6 +261,7 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
 
           <nav className="flex-1 overflow-y-auto">
              <SidebarItem id="account" label="Account" icon="fa-user" />
+             <SidebarItem id="api_keys" label="API Keys" icon="fa-key" />
              <SidebarItem id="appearance" label="Appearance" icon="fa-palette" />
              <SidebarItem id="behavior" label="Behavior" icon="fa-sliders" />
              <SidebarItem id="data" label="Data Controls" icon="fa-database" />
@@ -266,7 +279,7 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
            
            {/* Header for Mobile/Title */}
            <div className="md:hidden p-4 border-b border-slate-800 flex justify-between items-center">
-              <span className="font-bold text-white capitalize">{activeTab}</span>
+              <span className="font-bold text-white capitalize">{activeTab.replace('_', ' ')}</span>
               <button onClick={onClose} className="text-slate-400"><i className="fa-solid fa-xmark"></i></button>
            </div>
 
@@ -331,20 +344,54 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
                         </div>
                      </div>
                   </div>
-
-                  {/* Subscription Mockup */}
-                  <div className="bg-gradient-to-r from-purple-900/20 to-blue-900/20 border border-purple-500/20 rounded-xl p-6">
-                     <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-white font-bold">Hyperion Pro</h3>
-                        <span className="px-2 py-1 bg-purple-500/20 text-purple-300 text-xs font-bold rounded">ACTIVE</span>
-                     </div>
-                     <p className="text-sm text-slate-400 mb-4">You have access to Gemini 3.0 Pro, Image Generation, and Neural Voice features.</p>
-                     <div className="flex gap-3">
-                        <button className="px-4 py-2 bg-white text-black text-sm font-bold rounded-lg hover:bg-slate-200 transition-colors">Upgrade Plan</button>
-                        <button className="px-4 py-2 bg-transparent border border-slate-600 text-white text-sm font-medium rounded-lg hover:border-white transition-colors">Billing</button>
-                     </div>
-                  </div>
                </div>
+             )}
+
+             {/* --- API KEYS TAB --- */}
+             {activeTab === 'api_keys' && (
+                 <div className="max-w-2xl space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
+                    <p className="text-slate-400 text-sm mb-4">
+                        Hyperion Omni connects directly to AI providers from your browser. Your keys are stored locally and never sent to our servers.
+                    </p>
+
+                    <div className="space-y-4">
+                        {[
+                            { id: 'google', label: 'Google Gemini', placeholder: 'AIza...', icon: 'fa-google', color: 'text-red-500' },
+                            { id: 'xai', label: 'xAI (Grok)', placeholder: 'xai-...', icon: 'fa-mask', color: 'text-slate-200' },
+                            { id: 'openai', label: 'OpenAI', placeholder: 'sk-...', icon: 'fa-bolt', color: 'text-green-500' },
+                            { id: 'anthropic', label: 'Anthropic (Claude)', placeholder: 'sk-ant...', icon: 'fa-robot', color: 'text-amber-500' },
+                            { id: 'moonshot', label: 'Moonshot (Kimi)', placeholder: 'sk-...', icon: 'fa-brain', color: 'text-blue-500' },
+                        ].map((provider) => (
+                            <div key={provider.id}>
+                                <label className="flex items-center gap-2 text-sm font-medium text-slate-300 mb-2">
+                                    <i className={`fa-brands ${provider.icon} ${provider.color} w-4 text-center`}></i>
+                                    {provider.label} API Key
+                                </label>
+                                <div className="flex gap-2">
+                                    <input 
+                                        type="password"
+                                        value={formData.apiKeys[provider.id] || ''}
+                                        onChange={(e) => handleKeyChange(provider.id, e.target.value)}
+                                        placeholder={provider.placeholder}
+                                        className="flex-1 bg-black border border-slate-800 rounded-lg px-4 py-2 text-white focus:border-aether-accent focus:outline-none font-mono text-sm"
+                                    />
+                                    {/* Visual checkmark if key exists */}
+                                    {formData.apiKeys[provider.id] && (
+                                        <div className="flex items-center justify-center w-10 text-green-500">
+                                            <i className="fa-solid fa-check"></i>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    <div className="flex justify-end pt-4">
+                        <button onClick={handleSave} className="bg-white text-black font-bold px-6 py-2 rounded-lg hover:bg-slate-200 transition-colors">
+                            {isSaving ? 'Saving...' : 'Save Keys'}
+                        </button>
+                    </div>
+                 </div>
              )}
 
              {/* --- APPEARANCE TAB --- */}

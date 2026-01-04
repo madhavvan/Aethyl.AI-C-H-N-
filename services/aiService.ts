@@ -144,7 +144,7 @@ export const generateChatTitle = async (
         { role: "system", content: "You generate concise chat titles." },
         { role: "user", content: prompt },
       ],
-      max_tokens: 20,
+      max_tokens: 20000,
       temperature: 0.7,
       stream: false,
     };

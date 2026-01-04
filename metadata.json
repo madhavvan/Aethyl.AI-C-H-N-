@@ -1,0 +1,7 @@
+{
+  "name": "Aether_Lens",
+  "description": "A hyper-advanced knowledge engine designed to traverse the digital void.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}

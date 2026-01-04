@@ -48,7 +48,7 @@ export class LiveService {
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } },
           },
-          systemInstruction: "You are Synapse_X's voice interface. Be concise, helpful, and conversational.",
+          systemInstruction: "You are HYPERION_OMNI's voice interface. Be concise, helpful, and conversational.",
         },
       });
 

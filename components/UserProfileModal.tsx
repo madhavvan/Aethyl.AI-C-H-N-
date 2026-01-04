@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { UserProfile, ConnectedApp } from '../types';
 
@@ -131,7 +130,7 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
              </div>
           </div>
           <h1>Connect ${app.name}</h1>
-          <p><strong>Aether Lens</strong> wants to access your ${app.name} account to sync data for personalized search.</p>
+          <p><strong>Hyperion Omni</strong> wants to access your ${app.name} account to sync data for personalized search.</p>
           
           <div class="scope-list">
             <div class="scope-item"><i class="fa-solid fa-check"></i> <span>View your profile details</span></div>
@@ -257,7 +256,7 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
           </nav>
           
           <div className="mt-auto px-4 py-4 text-[10px] text-slate-600 border-t border-slate-800">
-             AETHER_LENS OS v3.1<br/>
+             HYPERION_OS v1.0<br/>
              BUILD: 2099.ALPHA
           </div>
         </div>
@@ -336,7 +335,7 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
                   {/* Subscription Mockup */}
                   <div className="bg-gradient-to-r from-purple-900/20 to-blue-900/20 border border-purple-500/20 rounded-xl p-6">
                      <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-white font-bold">Aether Pro</h3>
+                        <h3 className="text-white font-bold">Hyperion Pro</h3>
                         <span className="px-2 py-1 bg-purple-500/20 text-purple-300 text-xs font-bold rounded">ACTIVE</span>
                      </div>
                      <p className="text-sm text-slate-400 mb-4">You have access to Gemini 3.0 Pro, Image Generation, and Neural Voice features.</p>
@@ -485,7 +484,7 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
              {/* --- CONNECTED APPS TAB --- */}
              {activeTab === 'connected' && (
                 <div className="max-w-2xl space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
-                   <p className="text-slate-400 text-sm mb-6">Connect your accounts to allow Aether Lens to search your personal data silos.</p>
+                   <p className="text-slate-400 text-sm mb-6">Connect your accounts to allow Hyperion Omni to search your personal data silos.</p>
                    
                    {formData.connectedApps && Object.values(formData.connectedApps).map((app) => (
                       <div key={app.id} className="flex items-center justify-between p-4 bg-slate-900/40 border border-slate-800 rounded-xl hover:border-slate-700 transition-colors">
@@ -528,7 +527,7 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
                   <div className="flex items-center justify-between">
                      <div>
                         <h3 className="text-white font-medium">AI Model Training</h3>
-                        <p className="text-xs text-slate-500 mt-1 max-w-md">Allow anonymized interaction data to be used to improve future Aether models.</p>
+                        <p className="text-xs text-slate-500 mt-1 max-w-md">Allow anonymized interaction data to be used to improve future Hyperion models.</p>
                      </div>
                      <div 
                         onClick={() => {
@@ -568,4 +567,3 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
 };
 
 export default UserProfileModal;
-    

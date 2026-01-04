@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import ModelSelector from './ModelSelector';
 import { AIModel, FocusMode, Attachment } from '../types';
@@ -159,8 +158,8 @@ const SearchBar: React.FC<SearchBarProps> = ({
       
       {!isCompact && (
         <div className="text-center mb-10 animate-in fade-in zoom-in duration-1000">
-           <h1 className={`text-6xl md:text-7xl font-display font-black text-transparent bg-clip-text mb-6 tracking-tight ${isLight ? 'bg-gradient-to-b from-slate-800 via-slate-600 to-slate-400' : 'bg-gradient-to-b from-white via-slate-200 to-slate-500 drop-shadow-[0_0_15px_rgba(255,255,255,0.3)]'}`}>
-            AETHER<span className="text-aether-accent">_</span>LENS
+           <h1 className={`text-5xl md:text-7xl font-display font-black text-transparent bg-clip-text mb-6 tracking-tight ${isLight ? 'bg-gradient-to-b from-slate-800 via-slate-600 to-slate-400' : 'bg-gradient-to-b from-white via-slate-200 to-slate-500 drop-shadow-[0_0_15px_rgba(255,255,255,0.3)]'}`}>
+            HYPERION<span className="text-aether-accent">_</span>OMNI
           </h1>
           <p className={`${isLight ? 'text-slate-500' : 'text-slate-400'} text-lg font-light tracking-wide max-w-md mx-auto`}>
             Traverse the digital void. <span className="text-aether-accent">Synthesize truth.</span>
@@ -203,7 +202,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={isCompact ? "Inject follow-up query..." : "Ask the Aether... (or attach files)"}
+            placeholder={isCompact ? "Inject follow-up query..." : "Ask Hyperion... (or attach files)"}
             className={`w-full bg-transparent text-lg px-6 py-5 focus:outline-none resize-none max-h-[200px] overflow-y-auto font-light rounded-t-2xl ${textColor} ${placeholderColor}`}
             rows={1}
             disabled={isLoading}
@@ -233,85 +232,70 @@ const SearchBar: React.FC<SearchBarProps> = ({
                </div>
             </div>
 
-            <div className="flex items-center gap-2 ml-auto pr-2 relative">
-              <ModelSelector 
-                 selectedModel={selectedModel} 
-                 onSelect={onModelSelect} 
-                 disabled={isLoading} 
-                 isLight={isLight}
+            <div className="flex items-center gap-3 w-full md:w-auto justify-between md:justify-end px-2 md:px-0">
+               {/* Model Selector */}
+               <ModelSelector 
+                  selectedModel={selectedModel} 
+                  onSelect={onModelSelect}
+                  isLight={isLight}
                />
 
-              <div className={`h-6 w-px mx-1 ${isLight ? 'bg-slate-300' : 'bg-slate-700'}`}></div>
+               <div className="flex items-center gap-2">
+                  {/* Voice Button */}
+                  <button
+                    type="button" 
+                    onClick={onVoiceStart}
+                    className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${isLight ? 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-800' : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white'}`}
+                    title="Voice Input"
+                  >
+                     <i className="fa-solid fa-microphone"></i>
+                  </button>
 
-              {/* File Upload Trigger */}
-              <input 
-                type="file" 
-                multiple 
-                ref={fileInputRef} 
-                className="hidden" 
-                onChange={handleFileSelect}
-              />
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isLoading}
-                className={`w-9 h-9 rounded-full flex items-center justify-center transition-all border border-transparent ${isLight ? 'text-slate-400 hover:text-blue-500 hover:bg-blue-50 hover:border-blue-200' : 'text-slate-400 hover:text-aether-accent hover:bg-aether-accent/10 hover:border-aether-accent/30'}`}
-                title="Attach Data Source"
-              >
-                <i className="fa-solid fa-paperclip"></i>
-              </button>
+                  {/* Attachment Trigger */}
+                   <button
+                    type="button" 
+                    onClick={() => fileInputRef.current?.click()}
+                    className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${isLight ? 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-800' : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white'}`}
+                    title="Attach File"
+                  >
+                     <i className="fa-solid fa-paperclip"></i>
+                  </button>
 
-              <button
-                type="button"
-                onClick={onVoiceStart}
-                disabled={isLoading}
-                className={`w-9 h-9 rounded-full flex items-center justify-center transition-all border border-transparent ${isLight ? 'text-slate-400 hover:text-blue-500 hover:bg-blue-50 hover:border-blue-200' : 'text-slate-400 hover:text-aether-accent hover:bg-aether-accent/10 hover:border-aether-accent/30'}`}
-                title="Neural Voice Link"
-              >
-                <i className="fa-solid fa-microphone-lines"></i>
-              </button>
-
-              <button
-                onClick={() => handleSubmit()}
-                disabled={(!query.trim() && attachments.length === 0) || isLoading}
-                className={`w-9 h-9 rounded-full flex items-center justify-center transition-all duration-300 shadow-lg
-                  ${(query.trim() || attachments.length > 0) && !isLoading 
-                    ? (isLight ? 'bg-blue-500 text-white hover:bg-blue-600 hover:scale-110 shadow-blue-500/30' : 'bg-aether-accent text-black hover:bg-white hover:scale-110 shadow-[0_0_15px_rgba(0,240,255,0.4)]')
-                    : (isLight ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-slate-800 text-slate-600 cursor-not-allowed')
-                  }`}
-              >
-                {isLoading ? (
-                  <i className="fa-solid fa-circle-notch fa-spin"></i>
-                ) : (
-                  <i className="fa-solid fa-arrow-up"></i>
-                )}
-              </button>
+                  {/* Submit Button */}
+                  <button 
+                    onClick={(e) => handleSubmit(e)}
+                    disabled={(!query.trim() && attachments.length === 0) || isLoading}
+                    className={`h-9 px-4 rounded-full font-bold transition-all flex items-center gap-2
+                      ${(!query.trim() && attachments.length === 0) || isLoading 
+                         ? (isLight ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-slate-800 text-slate-600 cursor-not-allowed')
+                         : (isLight 
+                             ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg hover:shadow-blue-500/30' 
+                             : 'bg-white text-black hover:bg-aether-accent hover:shadow-[0_0_15px_rgba(0,240,255,0.4)]')
+                      }
+                    `}
+                  >
+                    {isLoading ? (
+                       <i className="fa-solid fa-circle-notch fa-spin"></i>
+                    ) : (
+                       <i className="fa-solid fa-arrow-up"></i>
+                    )}
+                  </button>
+               </div>
             </div>
+
           </div>
         </div>
-      </div>
 
-      {!isCompact && (
-        <div className="mt-12 grid grid-cols-2 md:grid-cols-4 gap-4 px-4 opacity-0 animate-in fade-in slide-in-from-bottom-4 duration-1000 delay-300 fill-mode-forwards">
-          {[
-            { label: "Quantum computing breakthroughs", icon: "fa-atom" },
-            { label: "Analyze TSLA Q3 earnings", icon: "fa-chart-line" },
-            { label: "Python script for RAG pipeline", icon: "fa-code" },
-            { label: "History of cyberpunk genre", icon: "fa-book-skull" }
-          ].map((item, idx) => (
-             <button 
-               key={idx}
-               onClick={() => onSearch(item.label, 'all', [])}
-               className={`p-4 rounded-xl border transition-all group text-left flex flex-col gap-2 ${isLight ? 'bg-white border-slate-200 hover:border-blue-400 hover:shadow-md' : 'bg-slate-900/40 border-slate-800 hover:border-aether-accent/40 hover:bg-slate-800/60'}`}
-             >
-               <i className={`fa-solid ${item.icon} transition-colors ${isLight ? 'text-slate-400 group-hover:text-blue-500' : 'text-slate-500 group-hover:text-aether-accent'}`}></i>
-               <span className={`text-sm font-medium leading-tight ${isLight ? 'text-slate-600 group-hover:text-slate-900' : 'text-slate-400 group-hover:text-white'}`}>
-                 {item.label}
-               </span>
-             </button>
-          ))}
-        </div>
-      )}
+        {/* Hidden File Input */}
+        <input 
+          type="file" 
+          ref={fileInputRef}
+          className="hidden"
+          multiple
+          onChange={handleFileSelect}
+        />
+
+      </div>
     </div>
   );
 };

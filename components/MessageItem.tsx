@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Message } from '../types';
@@ -29,7 +28,7 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, isLight, textSize = 
     if (navigator.share) {
         try {
             await navigator.share({
-                title: 'Aether Lens Search',
+                title: 'Hyperion Search Result',
                 text: message.content
             });
         } catch (err) {
@@ -85,7 +84,7 @@ const MessageItem: React.FC<MessageItemProps> = ({ message, isLight, textSize = 
            {/* Header Info */}
            <div className="flex items-center justify-between mb-3">
              <div className="flex items-center gap-2">
-               <span className={`font-display text-sm font-bold tracking-wide ${isLight ? 'text-blue-600' : 'text-aether-accent'}`}>AETHER_LENS</span>
+               <span className={`font-display text-sm font-bold tracking-wide ${isLight ? 'text-blue-600' : 'text-aether-accent'}`}>HYPERION_CORE</span>
                {message.modelUsed && (
                  <span className={`text-[10px] px-2 py-0.5 rounded border font-mono ${isLight ? 'bg-slate-100 border-slate-200 text-slate-500' : 'bg-slate-900/50 border-slate-800 text-slate-500'}`}>
                    {message.modelUsed}

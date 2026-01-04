@@ -22,7 +22,7 @@ const LandingPage = ({ onConnect, isLight }: { onConnect: () => void, isLight: b
       </div>
       
       <h1 className={`text-3xl font-display font-bold mb-2 ${isLight ? 'text-slate-800' : 'text-white'}`}>
-        AETHER_LENS
+        HYPERION_OMNI
       </h1>
       <p className={`mb-8 ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
         Secure uplink required to access the neural knowledge network. Please authenticate with a valid API key.
@@ -535,7 +535,7 @@ const App: React.FC = () => {
              <i className="fa-solid fa-infinity text-lg"></i>
           </div>
           <div className="hidden lg:block">
-             <span className={`font-bold text-xl tracking-wider ${isMinimal || isLight ? 'font-sans' : 'font-display'}`}>AETHER</span>
+             <span className={`font-bold text-xl tracking-wider ${isMinimal || isLight ? 'font-sans' : 'font-display'}`}>HYPERION</span>
           </div>
         </div>
 
@@ -637,7 +637,7 @@ const App: React.FC = () => {
               `}>
                  <i className="fa-solid fa-infinity text-xs"></i>
               </div>
-              <span className={`font-bold text-lg tracking-wide ${isLight ? 'text-slate-900' : 'text-white'} ${isMinimal || isLight ? 'font-sans' : 'font-display'}`}>AETHER</span>
+              <span className={`font-bold text-lg tracking-wide ${isLight ? 'text-slate-900' : 'text-white'} ${isMinimal || isLight ? 'font-sans' : 'font-display'}`}>HYPERION</span>
            </div>
            <button onClick={() => setIsProfileOpen(true)} className="text-slate-400 hover:text-white">
               {userProfile.avatar ? (

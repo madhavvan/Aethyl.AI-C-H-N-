@@ -1,5 +1,6 @@
-import { GoogleGenAI } from "@google/genai";
-import { SYSTEM_INSTRUCTION, getNeuralUplink, getSystemInstructionForFocus } from "../constants";
+// src/services/aiService.ts
+import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
+import { SYSTEM_INSTRUCTION, getSystemInstructionForFocus } from "../constants";
 import { Source, AIModel, FocusMode, Attachment, UserProfile } from "../types";
 
 export interface SearchResponse {
@@ -8,49 +9,119 @@ export interface SearchResponse {
   images?: string[];
 }
 
-// --- OPENAI COMPATIBLE TYPES (xAI, Moonshot, OpenAI) ---
-type ChatCompletionChunk = {
-  id?: string;
-  choices?: Array<{
-    delta?: { content?: string };
-  }>;
-};
-
+/** -----------------------------
+ * Provider endpoints (browser-side)
+ * ----------------------------- */
 const PROVIDER_URLS: Record<string, string> = {
-    'xAI': "https://api.x.ai/v1/chat/completions",
-    'OpenAI': "https://api.openai.com/v1/chat/completions",
-    'Moonshot': "https://api.moonshot.cn/v1/chat/completions",
-    'Anthropic': "https://api.anthropic.com/v1/messages"
+  xai: "https://api.x.ai/v1/chat/completions",
+  openai: "https://api.openai.com/v1/chat/completions",
+  moonshot: "https://api.moonshot.ai/v1/chat/completions",
+  anthropic: "https://api.anthropic.com/v1/messages",
 };
 
-// Helper: safe access to env in Vite
+const GEMINI_INLINE_SUPPORTED_TYPES = [
+  "application/pdf",
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/heic",
+  "image/heif",
+  "audio/wav",
+  "audio/mp3",
+  "audio/aiff",
+  "audio/aac",
+  "audio/ogg",
+  "audio/flac",
+  "video/mp4",
+  "video/mpeg",
+  "video/mov",
+  "video/avi",
+  "video/x-flv",
+  "video/mpg",
+  "video/webm",
+  "video/wmv",
+  "video/3gpp",
+];
+
+/** -----------------------------
+ * Env helper (Vite-safe)
+ * ----------------------------- */
 const getEnvKey = (name: string): string | undefined => {
   try {
     // @ts-ignore
-    return typeof import.meta !== "undefined" ? import.meta.env?.[name] : undefined;
+    const v = typeof import.meta !== "undefined" ? import.meta.env?.[name] : undefined;
+    return typeof v === "string" && v.trim() ? v : undefined;
   } catch {
     return undefined;
   }
 };
 
-// --- KEY RETRIEVAL HELPER ---
-const getApiKeyForProvider = (provider: string, userProfile: UserProfile): string | undefined => {
-    // 1. Check User Profile first (Bring Your Own Key)
-    const profileKey = userProfile.apiKeys?.[provider.toLowerCase()];
-    if (profileKey) return profileKey;
+/** -----------------------------
+ * Provider normalization
+ * Your models use provider labels like: 'Google', 'xAI', 'OpenAI', 'Moonshot', 'Anthropic'
+ * ----------------------------- */
+const normalizeProvider = (providerLabel: string): "google" | "xai" | "openai" | "moonshot" | "anthropic" => {
+  const p = (providerLabel || "").toLowerCase();
 
-    // 2. Check Environment Variables (Deployment Config)
-    switch(provider) {
-        case 'Google': return getEnvKey('VITE_GOOGLE_API_KEY') || getEnvKey('API_KEY');
-        case 'xAI': return getEnvKey('VITE_GROK_API_KEY');
-        case 'OpenAI': return getEnvKey('VITE_OPENAI_API_KEY');
-        case 'Anthropic': return getEnvKey('VITE_ANTHROPIC_API_KEY');
-        case 'Moonshot': return getEnvKey('VITE_MOONSHOT_API_KEY');
-        default: return undefined;
-    }
+  if (p.includes("google") || p.includes("gemini")) return "google";
+  if (p.includes("xai") || p.includes("grok")) return "xai";
+  if (p.includes("openai") || p.includes("gpt")) return "openai";
+  if (p.includes("moonshot") || p.includes("kimi")) return "moonshot";
+  if (p.includes("anthropic") || p.includes("claude")) return "anthropic";
+
+  // default safe choice
+  return "google";
 };
 
-// --- SSE HELPER ---
+/** -----------------------------
+ * API key retrieval
+ * Priority:
+ *  1) userProfile.apiKeys[providerKey]
+ *  2) env vars (VITE_*)
+ * ----------------------------- */
+const getApiKeyForProvider = (
+  providerLabel: string,
+  userProfile: UserProfile
+): { providerKey: ReturnType<typeof normalizeProvider>; apiKey?: string } => {
+  const providerKey = normalizeProvider(providerLabel);
+
+  // 1) BYOK via user profile
+  const profileKey = userProfile.apiKeys?.[providerKey];
+  if (profileKey && profileKey.trim()) return { providerKey, apiKey: profileKey.trim() };
+
+  // 2) env fallback (Vite)
+  if (providerKey === "google") {
+    return {
+      providerKey,
+      apiKey: getEnvKey("VITE_GOOGLE_API_KEY") || getEnvKey("VITE_GEMINI_API_KEY") || getEnvKey("VITE_API_KEY"),
+    };
+  }
+
+  if (providerKey === "xai") {
+    return {
+      providerKey,
+      apiKey: getEnvKey("VITE_XAI_API_KEY") || getEnvKey("VITE_GROK_API_KEY"),
+    };
+  }
+
+  if (providerKey === "openai") {
+    return { providerKey, apiKey: getEnvKey("VITE_OPENAI_API_KEY") };
+  }
+
+  if (providerKey === "moonshot") {
+    return { providerKey, apiKey: getEnvKey("VITE_MOONSHOT_API_KEY") };
+  }
+
+  if (providerKey === "anthropic") {
+    return { providerKey, apiKey: getEnvKey("VITE_ANTHROPIC_API_KEY") };
+  }
+
+  return { providerKey, apiKey: undefined };
+};
+
+/** -----------------------------
+ * SSE reader
+ * ----------------------------- */
 async function* sseLines(stream: ReadableStream<Uint8Array>) {
   const reader = stream.getReader();
   const decoder = new TextDecoder("utf-8");
@@ -59,7 +130,9 @@ async function* sseLines(stream: ReadableStream<Uint8Array>) {
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
+
     buffer += decoder.decode(value, { stream: true });
+
     let newlineIndex: number;
     while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
       const line = buffer.slice(0, newlineIndex);
@@ -67,27 +140,60 @@ async function* sseLines(stream: ReadableStream<Uint8Array>) {
       yield line.trimEnd();
     }
   }
+
   if (buffer.length > 0) yield buffer.trimEnd();
 }
 
-// --- FORMATTING HELPERS ---
+/** -----------------------------
+ * History conversion
+ * ----------------------------- */
 function mapHistoryToOpenAIStyle(history: { role: string; parts: { text: string }[] }[]) {
   return history
     .map((h) => ({
       role: h.role === "model" ? "assistant" : "user",
-      content: h.parts.map(p => p.text || "").join("")
+      content: (h.parts || []).map((p) => p?.text ?? "").join(""),
     }))
-    .filter(m => m.content.trim().length > 0);
+    .filter((m) => m.content.trim().length > 0);
 }
 
-// --- TITLE GENERATION ---
-export const generateChatTitle = async (query: string, responseContext: string): Promise<string> => {
-    // Simple logic: return truncated query to save tokens/calls on title gen for now
-    // or implement a lightweight call if desired.
-    return query.length > 40 ? query.substring(0, 40) + "..." : query;
+/** -----------------------------
+ * System instruction builder (preserves your logic)
+ * ----------------------------- */
+function buildSystemInstruction(selectedModel: AIModel, userProfile: UserProfile, focusMode: FocusMode) {
+  let systemInstruction = SYSTEM_INSTRUCTION;
+
+  if (selectedModel.systemInstructionPrefix) {
+    systemInstruction = `${selectedModel.systemInstructionPrefix}\n\n${systemInstruction}`;
+  }
+
+  if (userProfile.aboutMe?.trim()) {
+    systemInstruction += `\n\nUSER CONTEXT:\n${userProfile.aboutMe}`;
+  }
+
+  if (userProfile.customInstructions?.trim()) {
+    systemInstruction += `\n\nUSER PREFERENCES:\n${userProfile.customInstructions}`;
+  }
+
+  const focusInst = getSystemInstructionForFocus(focusMode);
+  if (focusInst) {
+    systemInstruction += `\n\nFOCUS MODE (${focusMode.toUpperCase()}): ${focusInst}`;
+  }
+
+  return systemInstruction;
+}
+
+/** -----------------------------
+ * Title generation
+ * Keep it cheap and stable: default to truncated query
+ * (You can later make this provider-aware if you want.)
+ * ----------------------------- */
+export const generateChatTitle = async (query: string, _responseContext: string): Promise<string> => {
+  return query.length > 40 ? query.substring(0, 40) + "..." : query;
 };
 
-// --- MAIN SEARCH FUNCTION ---
+/** -----------------------------
+ * Main function (provider router)
+ * ----------------------------- */
 export const performDeepSearch = async (
   query: string,
   history: { role: string; parts: { text: string }[] }[],
@@ -97,183 +203,256 @@ export const performDeepSearch = async (
   focusMode: FocusMode = "all",
   onChunk?: (text: string) => void
 ): Promise<SearchResponse> => {
-  
-  const provider = selectedModel.provider;
-  const apiKey = getApiKeyForProvider(provider, userProfile);
+  try {
+    const { providerKey, apiKey } = getApiKeyForProvider(selectedModel.provider, userProfile);
 
-  if (!apiKey) {
-      throw new Error(`Missing API Key for ${provider}. Please add it in Settings > API Keys.`);
-  }
+    if (!apiKey) {
+      throw new Error(`Missing API Key for ${selectedModel.provider}. Please add it in Settings > API Keys.`);
+    }
 
-  // 1. Prepare System Instruction
-  let systemInstruction = SYSTEM_INSTRUCTION;
-  if (selectedModel.systemInstructionPrefix) {
-      systemInstruction = `${selectedModel.systemInstructionPrefix}\n\n${systemInstruction}`;
-  }
-  
-  if (userProfile.aboutMe) systemInstruction += `\n\nUSER CONTEXT:\n${userProfile.aboutMe}`;
-  if (userProfile.customInstructions) systemInstruction += `\n\nUSER PREFERENCES:\n${userProfile.customInstructions}`;
-  
-  const focusInst = getSystemInstructionForFocus(focusMode);
-  if (focusInst) systemInstruction += `\n\nFOCUS MODE (${focusMode.toUpperCase()}): ${focusInst}`;
+    const systemInstruction = buildSystemInstruction(selectedModel, userProfile, focusMode);
 
-  // 2. Prepare Context/Attachments
-  const contextParts: string[] = [];
-  attachments.forEach(att => {
+    // Prepare attachment text (used by non-Gemini providers)
+    const contextParts: string[] = [];
+    for (const att of attachments) {
       if (att.isText) {
-          contextParts.push(`\n[FILE: ${att.name}]\n${att.data}\n[END FILE]\n`);
+        contextParts.push(`\n[FILE: ${att.name}]\n${att.data}\n[END FILE]\n`);
       } else {
-          contextParts.push(`\n[BINARY FILE: ${att.name} (${att.type}) - Content Omitted in Text Stream]\n`);
+        contextParts.push(`\n[BINARY FILE: ${att.name} (${att.type}) - Content Omitted in Text Stream]\n`);
       }
-  });
-  
-  const finalQuery = `${contextParts.join('\n')}\n\n${query}`;
+    }
+    const finalQuery = `${contextParts.join("\n")}\n\n${query}`.trim();
 
-  // --- ROUTING ---
-  
-  // A. GOOGLE GEMINI
-  if (provider === 'Google') {
+    /** =========================
+     * A) GOOGLE / GEMINI
+     * ========================= */
+    if (providerKey === "google") {
       const ai = new GoogleGenAI({ apiKey });
       const modelId = selectedModel.internalModelId;
-      
-      // Map history to Gemini Format
-      // Note: We use the existing structure passed in 'history' which is already partially Gemini-shaped
-      // but strictly it should be Content objects.
-      
-      // Construct Request
-      const contents = history.map(h => ({
-          role: h.role,
-          parts: h.parts
+
+      // 1) Build Gemini contents
+      const contents: any[] = history.map((h) => ({
+        role: h.role,
+        parts: h.parts,
       }));
-      // Add current message
-      contents.push({ role: 'user', parts: [{ text: finalQuery }] });
 
+      // Current message parts (restore full multimodal support here)
+      const currentParts: any[] = [];
+
+      for (const att of attachments) {
+        if (att.isText) {
+          currentParts.push({
+            text: `\n\n--- FILE ATTACHMENT: ${att.name} ---\n${att.data}\n--- END ATTACHMENT ---\n\n`,
+          });
+        } else {
+          if (GEMINI_INLINE_SUPPORTED_TYPES.includes(att.type)) {
+            currentParts.push({
+              inlineData: {
+                mimeType: att.type,
+                data: att.data, // base64
+              },
+            });
+          } else {
+            console.warn(`Skipping attachment ${att.name}: Unsupported MIME type for Gemini inlineData: ${att.type}`);
+            // Optional: still pass a note to the model
+            currentParts.push({
+              text: `\n\n[NOTE] Attachment skipped (unsupported type): ${att.name} (${att.type})\n\n`,
+            });
+          }
+        }
+      }
+
+      if (finalQuery) currentParts.push({ text: finalQuery });
+      contents.push({ role: "user", parts: currentParts });
+
+      // 2) Config (Gemini supports googleSearch tool)
       const config: any = {
-          systemInstruction,
-          tools: [{ googleSearch: {} }] // Only for Gemini
+        systemInstruction,
+        tools: [{ googleSearch: {} }],
       };
-      
+
       if (selectedModel.useThinking) config.thinkingConfig = { thinkingBudget: 2048 };
-      
+
+      // 3) Stream
       const responseStream = await ai.models.generateContentStream({
-          model: modelId,
-          contents,
-          config
+        model: modelId,
+        contents,
+        config,
       });
 
       let fullText = "";
+      const images: string[] = [];
       const sources: Source[] = [];
-      
+      const sourceMap = new Set<string>();
+
       for await (const chunk of responseStream) {
-          const text = chunk.text;
-          if (text) {
-              fullText += text;
-              onChunk?.(fullText);
-          }
-          
-          // Collect Grounding
-          if (chunk.candidates?.[0]?.groundingMetadata?.groundingChunks) {
-             chunk.candidates[0].groundingMetadata.groundingChunks.forEach((c: any) => {
-                 if (c.web?.uri && c.web?.title) {
-                     sources.push({ title: c.web.title, url: c.web.uri });
-                 }
-             });
-          }
-      }
-      return { text: fullText, sources, images: [] };
-  }
+        const c = chunk as GenerateContentResponse;
 
-  // B. ANTHROPIC (CLAUDE)
-  if (provider === 'Anthropic') {
-      // NOTE: Direct browser calls to Anthropic usually fail CORS unless proxied.
-      // We implement standard fetch here.
-      
+        if (c.text) {
+          fullText += c.text;
+          onChunk?.(fullText);
+        }
+
+        // Collect images from inlineData parts (if model returns images)
+        if (c.candidates?.[0]?.content?.parts) {
+          for (const part of c.candidates[0].content.parts) {
+            if (part.inlineData?.data) {
+              const base64Str = part.inlineData.data;
+              const mimeType = part.inlineData.mimeType || "image/png";
+              images.push(`data:${mimeType};base64,${base64Str}`);
+            }
+          }
+        }
+
+        // Grounding sources (dedup)
+        const groundingChunks: any[] | undefined = c.candidates?.[0]?.groundingMetadata?.groundingChunks as any;
+        if (groundingChunks?.length) {
+          for (const gc of groundingChunks) {
+            if (gc.web?.uri && gc.web?.title && !sourceMap.has(gc.web.uri)) {
+              sourceMap.add(gc.web.uri);
+              sources.push({ title: gc.web.title, url: gc.web.uri });
+            }
+          }
+        }
+      }
+
+      if (!fullText && images.length === 0) {
+        fullText = "Data retrieval failed. The void returned nothing.";
+      }
+
+      return { text: fullText, sources, images };
+    }
+
+    /** =========================
+     * B) ANTHROPIC / CLAUDE
+     * =========================
+     * NOTE: Direct browser calls may still be blocked by CORS depending on your setup.
+     * The header below is Anthropic's opt-in for direct browser access.
+     */
+    if (providerKey === "anthropic") {
+      const url = PROVIDER_URLS.anthropic;
+
       const messages = mapHistoryToOpenAIStyle(history);
-      messages.push({ role: 'user', content: finalQuery });
-
-      const res = await fetch(PROVIDER_URLS.Anthropic, {
-          method: 'POST',
-          headers: {
-              'x-api-key': apiKey,
-              'anthropic-version': '2023-06-01',
-              'content-type': 'application/json',
-              'dangerously-allow-browser': 'true' // Client-side specific header for Anthropic
-          },
-          body: JSON.stringify({
-              model: selectedModel.internalModelId,
-              max_tokens: 4096,
-              messages: messages,
-              system: systemInstruction,
-              stream: true
-          })
-      });
-
-      if (!res.ok) throw new Error(`Anthropic API Error: ${res.status}`);
-      if (!res.body) throw new Error("No response body");
-
-      let fullText = "";
-      for await (const line of sseLines(res.body)) {
-          if (!line.startsWith("data:")) continue;
-          const dataStr = line.slice(5).trim();
-          if (!dataStr || dataStr === '[DONE]') continue;
-          
-          try {
-              const event = JSON.parse(dataStr);
-              if (event.type === 'content_block_delta' && event.delta?.text) {
-                  fullText += event.delta.text;
-                  onChunk?.(fullText);
-              }
-          } catch(e) {}
-      }
-      return { text: fullText, sources: [] };
-  }
-
-  // C. OPENAI / xAI / MOONSHOT (COMPATIBLE)
-  if (['OpenAI', 'xAI', 'Moonshot'].includes(provider)) {
-      const url = PROVIDER_URLS[provider];
-      const messages = [
-          { role: 'system', content: systemInstruction },
-          ...mapHistoryToOpenAIStyle(history),
-          { role: 'user', content: finalQuery }
-      ];
+      messages.push({ role: "user", content: finalQuery || query });
 
       const res = await fetch(url, {
-          method: 'POST',
-          headers: {
-              'Authorization': `Bearer ${apiKey}`,
-              'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-              model: selectedModel.internalModelId,
-              messages,
-              stream: true,
-              temperature: 0.7
-          })
+        method: "POST",
+        headers: {
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify({
+          model: selectedModel.internalModelId,
+          max_tokens: 4096,
+          messages,
+          system: systemInstruction,
+          stream: true,
+        }),
       });
 
       if (!res.ok) {
-          const err = await res.text();
-          throw new Error(`${provider} API Error: ${res.status} - ${err}`);
+        const err = await res.text().catch(() => "");
+        throw new Error(`Anthropic API Error: ${res.status} - ${err}`);
       }
-      if (!res.body) throw new Error("No response body");
+      if (!res.body) throw new Error("No response body from Anthropic.");
 
       let fullText = "";
-      for await (const line of sseLines(res.body)) {
-          if (!line.startsWith("data:")) continue;
-          const dataStr = line.slice(5).trim();
-          if (dataStr === '[DONE]') break;
-          
-          try {
-              const parsed = JSON.parse(dataStr) as ChatCompletionChunk;
-              const content = parsed.choices?.[0]?.delta?.content;
-              if (content) {
-                  fullText += content;
-                  onChunk?.(fullText);
-              }
-          } catch (e) {}
-      }
-      return { text: fullText, sources: [] };
-  }
+      let currentEvent = "";
 
-  throw new Error(`Provider ${provider} not implemented.`);
+      for await (const line of sseLines(res.body)) {
+        if (!line) continue;
+
+        if (line.startsWith("event:")) {
+          currentEvent = line.slice("event:".length).trim();
+          continue;
+        }
+
+        if (!line.startsWith("data:")) continue;
+        const dataStr = line.slice("data:".length).trim();
+        if (!dataStr) continue;
+
+        try {
+          const evt = JSON.parse(dataStr);
+
+          // Most useful deltas come through this event type
+          if (currentEvent === "content_block_delta" && evt.delta?.text) {
+            fullText += evt.delta.text;
+            onChunk?.(fullText);
+          }
+
+          if (currentEvent === "message_stop") break;
+        } catch {
+          // ignore malformed keepalives
+        }
+      }
+
+      if (!fullText) fullText = "Data retrieval failed. The void returned nothing.";
+      return { text: fullText, sources: [], images: [] };
+    }
+
+    /** =========================
+     * C) OpenAI-compatible
+     * (xAI / OpenAI / Moonshot)
+     * ========================= */
+    if (providerKey === "xai" || providerKey === "openai" || providerKey === "moonshot") {
+      const url = PROVIDER_URLS[providerKey];
+
+      const messages = [
+        { role: "system", content: systemInstruction },
+        ...mapHistoryToOpenAIStyle(history),
+        { role: "user", content: finalQuery || query },
+      ];
+
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: selectedModel.internalModelId,
+          messages,
+          stream: true,
+          temperature: 0.7,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.text().catch(() => "");
+        throw new Error(`${selectedModel.provider} API Error: ${res.status} - ${err}`);
+      }
+      if (!res.body) throw new Error("No response body from provider.");
+
+      let fullText = "";
+
+      for await (const line of sseLines(res.body)) {
+        if (!line.startsWith("data:")) continue;
+
+        const dataStr = line.slice("data:".length).trim();
+        if (dataStr === "[DONE]") break;
+        if (!dataStr) continue;
+
+        try {
+          const parsed = JSON.parse(dataStr) as { choices?: Array<{ delta?: { content?: string } }> };
+          const delta = parsed.choices?.[0]?.delta?.content;
+          if (delta) {
+            fullText += delta;
+            onChunk?.(fullText);
+          }
+        } catch {
+          // ignore malformed keepalives
+        }
+      }
+
+      if (!fullText) fullText = "Data retrieval failed. The void returned nothing.";
+      return { text: fullText, sources: [], images: [] };
+    }
+
+    throw new Error(`Provider ${selectedModel.provider} not implemented.`);
+  } catch (error) {
+    console.error("Model Adapter Error:", error);
+    throw error;
+  }
 };

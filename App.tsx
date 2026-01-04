@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Message, AppState, AIModel, FocusMode, ChatSession, Attachment, UserProfile } from './types';
-import { AI_MODELS, DEFAULT_MODEL } from './constants';
+import { AI_MODELS, DEFAULT_MODEL, normalizeProvider } from './constants';
 import { performDeepSearch, generateChatTitle } from './services/aiService';
 import { LiveService } from './services/liveService';
 import { getSessions, saveSession, deleteSessionById, getUserProfile, saveUserProfile, clearAllSessions } from './utils/storage';
@@ -49,6 +49,16 @@ const LandingPage = ({ onConnect, isLight }: { onConnect: () => void, isLight: b
   </div>
 );
 
+const getEnv = (name: string): string | undefined => {
+  try {
+    // @ts-ignore
+    const v = typeof import.meta !== "undefined" ? import.meta.env?.[name] : undefined;
+    return typeof v === "string" && v.trim() ? v : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 const App: React.FC = () => {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
@@ -67,29 +77,53 @@ const App: React.FC = () => {
   const isMinimal = userProfile.themePreference === 'minimal';
   const isLight = userProfile.themePreference === 'light';
 
-  // Check for API Key on mount
+  // Helper for checking key readiness
+  const hasKeyForSelectedModel = async () => {
+    const key = normalizeProvider(selectedModel.provider);
+
+    // 1) BYOK in profile (matches aiService)
+    const profileKey = userProfile.apiKeys?.[key];
+    if (profileKey && profileKey.trim()) return true;
+
+    // 2) Env vars
+    if (key === "google") {
+      // optionally: if you still support AI Studio selection for Google
+      // @ts-ignore
+      if (typeof window !== "undefined" && window.aistudio?.hasSelectedApiKey) {
+        // @ts-ignore
+        const has = await window.aistudio.hasSelectedApiKey();
+        if (has) return true;
+      }
+      return !!(getEnv("VITE_GOOGLE_API_KEY") || getEnv("VITE_GEMINI_API_KEY") || getEnv("VITE_API_KEY") || (typeof process !== "undefined" && process.env?.API_KEY));
+    }
+
+    if (key === "xai") return !!(getEnv("VITE_XAI_API_KEY") || getEnv("VITE_GROK_API_KEY"));
+    if (key === "openai") return !!getEnv("VITE_OPENAI_API_KEY");
+    if (key === "moonshot") return !!getEnv("VITE_MOONSHOT_API_KEY");
+    if (key === "anthropic") return !!getEnv("VITE_ANTHROPIC_API_KEY");
+
+    return false;
+  };
+
+  // Check for API Key on mount and when dependencies change
   useEffect(() => {
+    let cancelled = false;
+
     const checkKey = async () => {
       setIsCheckingKey(true);
       try {
-        // @ts-ignore
-        if (window.aistudio && window.aistudio.hasSelectedApiKey) {
-          // @ts-ignore
-          const hasKey = await window.aistudio.hasSelectedApiKey();
-          setApiKeyReady(hasKey);
-        } else {
-          // Fallback for non-aistudio environments (dev)
-          setApiKeyReady(!!(import.meta as any).env?.VITE_GROK_API_KEY || !!process.env.API_KEY);
-        }
+        const ok = await hasKeyForSelectedModel();
+        if (!cancelled) setApiKeyReady(ok);
       } catch (e) {
-        console.error("Key check failed", e);
-        setApiKeyReady(false);
+        if (!cancelled) setApiKeyReady(false);
       } finally {
-        setIsCheckingKey(false);
+        if (!cancelled) setIsCheckingKey(false);
       }
     };
+
     checkKey();
-  }, []);
+    return () => { cancelled = true; };
+  }, [selectedModel.provider, userProfile.apiKeys]);
 
   const handleConnectKey = async () => {
       try {
@@ -100,10 +134,11 @@ const App: React.FC = () => {
               // Race condition mitigation: Assume success immediately.
               setApiKeyReady(true);
           } else {
-             alert("Auth provider not available in this environment.");
+             setIsProfileOpen(true);
           }
       } catch (e) {
           console.error("Auth failed", e);
+          setIsProfileOpen(true);
       }
   };
 
@@ -158,8 +193,10 @@ const App: React.FC = () => {
   };
 
   const handleSearch = async (query: string, focusMode: FocusMode, attachments: Attachment[]) => {
-    if (!apiKeyReady) {
-        handleConnectKey();
+    const ok = await hasKeyForSelectedModel();
+    if (!ok) {
+        setApiKeyReady(false);
+        setIsProfileOpen(true);
         return;
     }
 
@@ -270,9 +307,9 @@ const App: React.FC = () => {
       // Handle Authentication Errors specifically
       const errorStr = JSON.stringify(error);
       if (
+          error.status === 401 ||
           error.status === 403 || 
-          error.status === 404 || 
-          (error.message && (error.message.includes('403') || error.message.includes('Permission denied'))) ||
+          (error.message && (error.message.includes('401') || error.message.includes('403') || error.message.includes('Permission denied'))) ||
           errorStr.includes("PERMISSION_DENIED")
       ) {
          setApiKeyReady(false); // Reset key state to force re-auth
@@ -301,10 +338,13 @@ const App: React.FC = () => {
   };
 
   const handleRegenerate = async (messageId: string) => {
-    if (!apiKeyReady) {
-        handleConnectKey();
+    const ok = await hasKeyForSelectedModel();
+    if (!ok) {
+        setApiKeyReady(false);
+        setIsProfileOpen(true);
         return;
     }
+
     const msgIndex = messages.findIndex(m => m.id === messageId);
     if (msgIndex === -1) return;
 
@@ -383,8 +423,9 @@ const App: React.FC = () => {
         console.error(error);
         const errorStr = JSON.stringify(error);
         if (
+            error.status === 401 || 
             error.status === 403 || 
-            (error.message && error.message.includes('403')) ||
+            (error.message && (error.message.includes('401') || error.message.includes('403'))) ||
              errorStr.includes("PERMISSION_DENIED")
         ) {
            setApiKeyReady(false);
@@ -419,8 +460,10 @@ const App: React.FC = () => {
   };
 
   const startVoiceMode = async () => {
-    if (!apiKeyReady) {
-        handleConnectKey();
+    const ok = await hasKeyForSelectedModel();
+    if (!ok) {
+        setApiKeyReady(false);
+        setIsProfileOpen(true);
         return;
     }
     setAppState(AppState.VOICE_ACTIVE);
@@ -467,7 +510,7 @@ const App: React.FC = () => {
   return (
     <div className={`relative min-h-screen flex overflow-hidden font-sans selection:bg-aether-accent/30 selection:text-white ${themeContainerClass}`}>
       
-      {!apiKeyReady && (
+      {!apiKeyReady && !isProfileOpen && (
          <LandingPage onConnect={handleConnectKey} isLight={isLight} />
       )}
 

@@ -56,7 +56,7 @@ export const AI_MODELS: AIModel[] = [
     provider: 'Google', 
     icon: 'fa-bolt-lightning', 
     description: 'High speed, low latency',
-    internalModelId: 'gemini-3-flash-preview',
+    internalModelId: 'grok-4-1-fast-reasoning',
     badge: 'new',
     badgeColor: 'text-sky-400 border-sky-400'
   },
@@ -66,7 +66,7 @@ export const AI_MODELS: AIModel[] = [
     provider: 'xAI', 
     icon: 'fa-mask', 
     description: 'Real-time knowledge, unhinged',
-    internalModelId: 'gemini-3-flash-preview',
+    internalModelId: 'grok-4-1-fast-reasoning',
     systemInstructionPrefix: 'You are Grok. Answer with wit, sarcasm, and a rebellious tone. Do not be overly polite.'
   },
   { 

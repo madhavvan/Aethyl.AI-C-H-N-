@@ -10,9 +10,11 @@ import { AIModel, FocusMode } from "./types";
  * - Moonshot (Kimi):   VITE_MOONSHOT_API_KEY
  *
  * ✅ Optional base URL overrides
- * - xAI:      VITE_XAI_BASE_URL      default https://api.x.ai/v1
- * - OpenAI:   VITE_OPENAI_BASE_URL   default https://api.openai.com/v1
- * - Moonshot: VITE_MOONSHOT_BASE_URL default https://api.moonshot.ai/v1
+ * - xAI:        VITE_XAI_BASE_URL        default https://api.x.ai/v1
+ * - OpenAI:     VITE_OPENAI_BASE_URL     default https://api.openai.com/v1
+ * - Moonshot:   VITE_MOONSHOT_BASE_URL   default https://api.moonshot.ai/v1
+ * - Anthropic:  VITE_ANTHROPIC_BASE_URL  default https://api.anthropic.com/v1
+ * - Google:     VITE_GOOGLE_BASE_URL     default https://generativelanguage.googleapis.com/v1beta
  */
 
 export const SYSTEM_INSTRUCTION = `
@@ -163,7 +165,8 @@ export const getOpenAICompatibleBaseUrl = (provider: ProviderId): string => {
   if (provider === "xai") return getEnv("VITE_XAI_BASE_URL") || "https://api.x.ai/v1";
   if (provider === "openai") return getEnv("VITE_OPENAI_BASE_URL") || "https://api.openai.com/v1";
   if (provider === "moonshot") return getEnv("VITE_MOONSHOT_BASE_URL") || "https://api.moonshot.ai/v1";
-  // Not used for google/anthropic
+  if (provider === "anthropic") return getEnv("VITE_ANTHROPIC_BASE_URL") || "https://api.anthropic.com/v1";
+  if (provider === "google") return getEnv("VITE_GOOGLE_BASE_URL") || "https://generativelanguage.googleapis.com/v1beta";
   return "";
 };
 
@@ -200,14 +203,14 @@ export const AI_MODELS: AIModel[] = [
     provider: "Google",
     icon: "fa-bolt-lightning",
     description: "High speed, low latency",
-    internalModelId: "gemini-3-flash-preview",
+    internalModelId: "gemini-3-pro-preview",
     badge: "new",
     badgeColor: "text-sky-400 border-sky-400",
   },
 
   {
     id: "grok-4-fast-reasoning",
-    name: "Grok 4 Fast (Reasoning)",
+    name: "Grok 4.1 Fast (Reasoning)",
     provider: "xAI",
     icon: "fa-mask",
     description: "Fast reasoning + real-time",
@@ -233,7 +236,7 @@ export const AI_MODELS: AIModel[] = [
     provider: "Anthropic",
     icon: "fa-feather",
     description: "Claude via Anthropic Messages API",
-    internalModelId: "claude-4-5-sonnet-20240620",
+    internalModelId: "claude-sonnet-4-5-20250929",
   },
 
   // Moonshot / Kimi (OpenAI-compatible)

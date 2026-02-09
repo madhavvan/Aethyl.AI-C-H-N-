@@ -232,11 +232,11 @@ export const AI_MODELS: AIModel[] = [
   // Anthropic example (replace internalModelId with what your account has access to)
   {
     id: "claude-sonnet",
-    name: "Claude (example)",
+    name: "Claude opus 4.6",
     provider: "Anthropic",
     icon: "fa-feather",
     description: "Claude via Anthropic Messages API",
-    internalModelId: "claude-sonnet-4-5-20250929",
+    internalModelId: "claude-opus-4-6",
   },
 
   // Moonshot / Kimi (OpenAI-compatible)
@@ -255,7 +255,7 @@ export const DEFAULT_MODEL = AI_MODELS[0];
 export const VOICE_MODEL_NAME = "gemini-2.5-flash-native-audio-preview-09-2025";
 
 /**
- * ✅ Google-only client (Gemini provider)
+ * ✅ Google-only client 
  * This should NOT be used for Grok/OpenAI/Moonshot/Claude calls.
  */
 export const getNeuralUplink = () => {

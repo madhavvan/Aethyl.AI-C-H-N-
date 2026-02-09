@@ -76,8 +76,8 @@ const normalizeProvider = (providerLabel: string): "google" | "xai" | "openai" |
 /** -----------------------------
  * API key retrieval
  * Priority:
- *  1) userProfile.apiKeys[providerKey]
- *  2) env vars (VITE_*)
+ * 1) userProfile.apiKeys[providerKey]
+ * 2) env vars (VITE_*)
  * ----------------------------- */
 const getApiKeyForProvider = (
   providerLabel: string,
@@ -269,9 +269,15 @@ export const performDeepSearch = async (
       const config: any = {
         systemInstruction,
         tools: [{ googleSearch: {} }],
+        // omitting maxOutputTokens implies "unlimited" (provider default max)
       };
 
-      if (selectedModel.useThinking) config.thinkingConfig = { thinkingBudget: 2048 };
+      if (selectedModel.useThinking) {
+        config.thinkingConfig = { thinkingBudget: 8192 };
+        // For thinking models, ensure we don't accidentally cap it if defaults change
+        // We set a high ceiling (e.g., 8192 or higher if supported) to allow thinking + generation
+        config.generationConfig = { maxOutputTokens: 30000 };
+      }
 
       // 3) Stream
       const responseStream = await ai.models.generateContentStream({
@@ -345,7 +351,9 @@ export const performDeepSearch = async (
         },
         body: JSON.stringify({
           model: selectedModel.internalModelId,
-          max_tokens: 4096,
+          // Anthropic REQUIRED field. 8192 is the current high-end max for 3.5 Sonnet/Opus.
+          // Setting this ensures we get the "max possible" for current models.
+          max_tokens: 30000, 
           messages,
           system: systemInstruction,
           stream: true,

@@ -22,6 +22,12 @@ export interface Attachment {
   isText: boolean; // Helper to distinguish between code/text and binary assets
 }
 
+export interface Quote {
+  id: string;
+  text: string;
+  sourceId?: string; // Optional: which message ID it came from
+}
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant';
@@ -34,6 +40,7 @@ export interface Message {
   modelUsed?: string;
   focusMode?: FocusMode;
   attachments?: Attachment[];
+  quotes?: Quote[]; // User selected quotes sent with this message
 }
 
 export interface ChatSession {

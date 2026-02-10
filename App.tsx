@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Message, AppState, AIModel, FocusMode, ChatSession, Attachment, UserProfile } from './types';
+import { Message, AppState, AIModel, FocusMode, ChatSession, Attachment, UserProfile, Quote } from './types';
 import { DEFAULT_MODEL } from './constants';
 import { performDeepSearch, generateChatTitle } from './services/aiService';
 import { LiveService } from './services/liveService';
@@ -8,6 +8,7 @@ import SearchBar from './components/SearchBar';
 import MessageItem from './components/MessageItem';
 import VoiceOverlay from './components/VoiceOverlay';
 import UserProfileModal from './components/UserProfileModal';
+import TextSelectionMenu from './components/TextSelectionMenu';
 
 // --- Components ---
 
@@ -37,6 +38,9 @@ const App: React.FC = () => {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false); // Mobile sidebar
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false); // Desktop collapse
+  
+  // Quote State
+  const [quotes, setQuotes] = useState<Quote[]>([]);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const liveServiceRef = useRef<LiveService | null>(null);
@@ -80,7 +84,15 @@ const App: React.FC = () => {
     setSessions(updatedSessions);
   };
 
-  const handleSearch = async (query: string, focusMode: FocusMode, attachments: Attachment[]) => {
+  const handleQuote = (text: string) => {
+    const newQuote: Quote = {
+      id: Math.random().toString(),
+      text: text.substring(0, 300) + (text.length > 300 ? '...' : '') // Truncate for UI, potentially keep full for logic if needed
+    };
+    setQuotes(prev => [...prev, newQuote]);
+  };
+
+  const handleSearch = async (query: string, focusMode: FocusMode, attachments: Attachment[], messageQuotes: Quote[] = []) => {
     let activeSessionId = currentSessionId;
     let isNewSession = false;
 
@@ -90,18 +102,27 @@ const App: React.FC = () => {
       isNewSession = true;
     }
 
+    // Construct the actual query context including quotes
+    let finalQuery = query;
+    if (messageQuotes.length > 0) {
+       const quoteContext = messageQuotes.map(q => `> ${q.text}`).join('\n');
+       finalQuery = `${quoteContext}\n\n${query}`;
+    }
+
     const userMsg: Message = {
       id: Date.now().toString(),
       role: 'user',
       content: query,
       timestamp: Date.now(),
       focusMode,
-      attachments
+      attachments,
+      quotes: messageQuotes
     };
 
     const initialMessages = [...messages, userMsg];
     setMessages(initialMessages);
     setAppState(AppState.SEARCHING);
+    setQuotes([]); // Clear quotes after sending
     
     // Optimistic Save
     const title = query.length > 30 ? query.substring(0, 30) + '...' : query;
@@ -121,14 +142,22 @@ const App: React.FC = () => {
     setMessages(prev => [...prev, placeholderAiMsg]);
 
     try {
-      const historyContext = initialMessages.map(m => ({
-        role: m.role === 'user' ? 'user' : 'model',
-        parts: [{ text: m.content }] 
-      }));
+      const historyContext = initialMessages.map(m => {
+        // We need to bake quotes into history context if they exist
+        let content = m.content;
+        if (m.quotes && m.quotes.length > 0) {
+            content = m.quotes.map(q => `> ${q.text}`).join('\n') + '\n\n' + content;
+        }
+        return {
+            role: m.role === 'user' ? 'user' : 'model',
+            parts: [{ text: content }] 
+        };
+      });
 
+      // We pass finalQuery here because performDeepSearch expects the raw prompt text for the current turn
       const result = await performDeepSearch(
-        query, 
-        historyContext, 
+        finalQuery, 
+        historyContext.slice(0, -1), // Exclude current message from history as it's passed as query
         attachments, 
         selectedModel, 
         userProfile, 
@@ -200,7 +229,7 @@ const App: React.FC = () => {
           // Truncate and re-search
           const truncated = messages.slice(0, messages.indexOf(lastUserMsg));
           setMessages(truncated);
-          handleSearch(lastUserMsg.content, lastUserMsg.focusMode || 'all', lastUserMsg.attachments || []);
+          handleSearch(lastUserMsg.content, lastUserMsg.focusMode || 'all', lastUserMsg.attachments || [], lastUserMsg.quotes || []);
       }
   };
 
@@ -221,6 +250,7 @@ const App: React.FC = () => {
     setCurrentSessionId(null);
     setAppState(AppState.IDLE);
     setSidebarOpen(false);
+    setQuotes([]);
   };
 
   const handleDeleteSession = (e: React.MouseEvent, id: string) => {
@@ -232,7 +262,8 @@ const App: React.FC = () => {
 
   return (
     <div className="flex h-screen bg-background text-primary overflow-hidden font-sans">
-      
+      <TextSelectionMenu onQuote={handleQuote} />
+
       {/* --- SIDEBAR (Desktop) --- */}
       <div className={`hidden md:flex flex-col border-r border-border bg-background transition-all duration-300 ${isSidebarCollapsed ? 'w-20' : 'w-64'}`}>
          {/* Header */}
@@ -376,6 +407,8 @@ const App: React.FC = () => {
                              onModelSelect={setSelectedModel}
                              onVoiceStart={startVoiceMode}
                              variant="home"
+                             quotes={quotes}
+                             onRemoveQuote={(id) => setQuotes(prev => prev.filter(q => q.id !== id))}
                          />
                      </div>
 
@@ -419,6 +452,8 @@ const App: React.FC = () => {
                              onModelSelect={setSelectedModel}
                              onVoiceStart={startVoiceMode}
                              variant="chat"
+                             quotes={quotes}
+                             onRemoveQuote={(id) => setQuotes(prev => prev.filter(q => q.id !== id))}
                          />
                      </div>
                  </div>
